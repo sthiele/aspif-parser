@@ -52,3 +52,41 @@ fn head_test() {
         Ok(("", Head::Disjunction { elements: res }))
     );
 }
+#[test]
+fn body_test() {
+    let res = vec![22, -3, 1];
+    assert_eq!(
+        body("0 3 22 -3 1"),
+        Ok(("", Body::NormalBody { elements: res }))
+    );
+    let res = vec![(3, 22), (2, -3), (1, 1)];
+    assert_eq!(
+        body("1 55 3 3 22 2 -3 1 1"),
+        Ok((
+            "",
+            Body::WeightBody {
+                lowerbound: 55,
+                elements: res
+            }
+        ))
+    );
+}
+
+#[test]
+fn rule_test() {
+    let res = vec![22, 3, 1];
+    let res2 = vec![(3, 22), (2, -3), (1, 1)];
+    assert_eq!(
+        lrule("1 3 22 3 1 1 55 3 3 22 2 -3 1 1"),
+        Ok((
+            "",
+            Rule {
+                head: Head::Choice { elements: res },
+                body: Body::WeightBody {
+                    lowerbound: 55,
+                    elements: res2
+                }
+            }
+        ))
+    );
+}

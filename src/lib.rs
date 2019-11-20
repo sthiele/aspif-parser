@@ -1,10 +1,10 @@
 use nom::{
-    bytes::complete::{tag, take, take_while1},
+    branch::alt,
+    bytes::complete::{tag, take_while1},
     character::is_space,
     combinator::{map_res, opt},
-    many1,
     multi::count,
-    named, one_of, separated_list, tag, IResult,
+    named, not, one_of, separated_list, tag, IResult,
 };
 use std::fs::File;
 use std::io::BufRead;
@@ -15,7 +15,7 @@ pub fn read(file: &File) -> Result<(), std::io::Error> {
     // let mut graph = Graph::empty();
     for line in file.lines() {
         let l1 = line?;
-        let l = l1.trim();
+        // let l = l1.trim();
         // if !l.is_empty() {
         //     match aspif::statement(&l) {
         //         Ok(r) => {
@@ -35,38 +35,59 @@ pub struct Header {
     pub revision: u64,
     pub incremental: bool,
 }
-pub struct Statement();
+pub enum Statement {}
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum Head {
     Disjunction { elements: Vec<u64> },
     Choice { elements: Vec<u64> },
 }
+#[derive(PartialEq, Clone, Debug)]
 pub enum Body {
     NormalBody {
         elements: Vec<i64>,
     },
     WeightBody {
         lowerbound: u64,
-        elements: Vec<WeightedBodyLit>,
+        elements: Vec<(u64, i64)>,
     },
-}
-pub struct WeightedBodyLit {
-    weight: u64,
-    literal: i64,
 }
 #[derive(PartialEq, Clone, Debug)]
 pub struct Rule {
     pub head: Head,
+    pub body: Body,
 }
-#[derive(PartialEq, Copy, Clone, Debug)]
-enum Tags {
-    Incremental,
-}
+
+named!(not_zero<&str, ()>, not!(tag!("0")));
+named!(zero_or_one<&str, char>, one_of!("01"));
+named!(aspif_tags<&str, Vec<&str>>, separated_list!(tag(" "), string));
 
 fn pos_number(input: &str) -> IResult<&str, u64> {
     map_res(take_while1(is_dec_digit), from_dec)(input)
 }
+fn atom_id(input: &str) -> IResult<&str, u64> {
+    let (input, _bla) = not_zero(input)?;
+    map_res(take_while1(is_dec_digit), from_dec)(input)
+}
+fn negated_atom(input: &str) -> IResult<&str, i64> {
+    let (input, _bla) = tag("-")(input)?;
+    let (input, id) = atom_id(input)?;
+    Ok((input, -(id as i64)))
+}
+fn pos_atom(input: &str) -> IResult<&str, i64> {
+    let (input, id) = atom_id(input)?;
+    Ok((input, id as i64))
+}
+fn body_literal(input: &str) -> IResult<&str, i64> {
+    alt((pos_atom, negated_atom))(input)
+}
+fn weighted_body_literal(input: &str) -> IResult<&str, (u64, i64)> {
+    let (input, weight) = pos_number(input)?;
+    let (input, _space) = tag(" ")(input)?;
+    let (input, literal) = body_literal(input)?;
+    Ok((input, (weight, literal)))
+}
+
 fn from_dec(input: &str) -> Result<u64, std::num::ParseIntError> {
     u64::from_str_radix(input, 10)
 }
@@ -81,9 +102,6 @@ pub fn string(input: &str) -> IResult<&str, &str> {
 fn is_alphanumeric(c: char) -> bool {
     c.is_alphanumeric()
 }
-
-named!(zero_or_one<&str, char>, one_of!("01"));
-named!(aspif_tags<&str, Vec<&str>>, separated_list!(tag(" "), string));
 
 pub fn aspif_tags2(input: &str) -> IResult<&str, Vec<&str>> {
     let (input, _space) = tag(" ")(input)?;
@@ -121,8 +139,9 @@ pub fn header(input: &str) -> IResult<&str, Header> {
 
 pub fn lrule(input: &str) -> IResult<&str, Rule> {
     let (input, head) = head(input)?;
+    let (input, _space) = tag(" ")(input)?;
     let (input, body) = body(input)?;
-    Ok((input, Rule { head }))
+    Ok((input, Rule { head, body }))
 }
 pub fn head(input: &str) -> IResult<&str, Head> {
     let (input, bla) = zero_or_one(input)?;
@@ -145,15 +164,14 @@ pub fn body(input: &str) -> IResult<&str, Body> {
     match bla {
         '0' => {
             let (input, _space) = tag(" ")(input)?;
-            // let (input, elements) = body_elements(input)?;
-            let elements = vec![];
+            let (input, elements) = body_literals(input)?;
             Ok((input, Body::NormalBody { elements }))
         }
         '1' => {
             let (input, _space) = tag(" ")(input)?;
-            let lowerbound = 0;
-            // let (input, elements) = weighted_body_elements(input)?;
-            let elements = vec![];
+            let (input, lowerbound) = pos_number(input)?;
+            let (input, _space) = tag(" ")(input)?;
+            let (input, elements) = weighted_body_literals(input)?;
             Ok((
                 input,
                 Body::WeightBody {
@@ -167,11 +185,31 @@ pub fn body(input: &str) -> IResult<&str, Body> {
 }
 fn head_elements(input: &str) -> IResult<&str, Vec<u64>> {
     let (input, size) = pos_number(input)?;
-    let (input, elements) = count(pos_number_with_space, size as usize)(input)?;
+    let (input, elements) = count(atom_id_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
 
-fn pos_number_with_space(input: &str) -> IResult<&str, u64> {
+fn atom_id_with_space(input: &str) -> IResult<&str, u64> {
     let (input, _space) = tag(" ")(input)?;
-    map_res(take_while1(is_dec_digit), from_dec)(input)
+    atom_id(input)
+}
+fn body_literals(input: &str) -> IResult<&str, Vec<i64>> {
+    let (input, size) = pos_number(input)?;
+    let (input, elements) = count(body_literal_with_space, size as usize)(input)?;
+    Ok((input, elements))
+}
+
+fn body_literal_with_space(input: &str) -> IResult<&str, i64> {
+    let (input, _space) = tag(" ")(input)?;
+    body_literal(input)
+}
+fn weighted_body_literals(input: &str) -> IResult<&str, Vec<(u64, i64)>> {
+    let (input, size) = pos_number(input)?;
+    let (input, elements) = count(weighted_body_literal_with_space, size as usize)(input)?;
+    Ok((input, elements))
+}
+
+fn weighted_body_literal_with_space(input: &str) -> IResult<&str, (u64, i64)> {
+    let (input, _space) = tag(" ")(input)?;
+    weighted_body_literal(input)
 }
