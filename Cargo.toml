@@ -1,0 +1,17 @@
+[package]
+name = "aspif-parser"
+version = "0.1.0"
+authors = ["Sven Thiele <sthiele78@gmail.com>"]
+description = "An aspif parser"
+readme = "README.md"
+documentation = ""
+repository = "https://github.com/sthiele/aspif-parser"
+publish = false
+edition = "2018"
+
+[dependencies]
+structopt = "0.3"
+thiserror = "1.0"
+anyhow = "1.0"
+peg = "0.6"
+nom = "5.0"
