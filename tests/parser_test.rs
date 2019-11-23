@@ -90,3 +90,43 @@ fn rule_test() {
         ))
     );
 }
+#[test]
+fn statement_test() {
+    let res = vec![22, 3, 1];
+    let res2 = vec![(3, 22), (2, -3), (1, 1)];
+    assert_eq!(
+        statement("1 1 3 22 3 1 1 55 3 3 22 2 -3 1 1"),
+        Ok((
+            "",
+            Statement::Rule(Rule {
+                head: Head::Choice { elements: res },
+                body: Body::WeightBody {
+                    lowerbound: 55,
+                    elements: res2
+                }
+            })
+        ))
+    );
+    let res2 = vec![(3, 22), (2, -3), (1, 1)];
+    assert_eq!(
+        statement("2 55 3 3 22 2 -3 1 1"),
+        Ok((
+            "",
+            Statement::Minimize(Minimize {
+                priority: 55,
+                elements: res2
+            })
+        ))
+    );
+    let res2 = vec![22, -3, 1];
+    assert_eq!(
+        statement("4 5 testx 3 22 -3 1"),
+        Ok((
+            "",
+            Statement::Output(Output {
+                string: "testx",
+                condition: res2
+            })
+        ))
+    );
+}
