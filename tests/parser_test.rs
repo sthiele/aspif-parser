@@ -120,13 +120,46 @@ fn statement_test() {
     );
     let res2 = vec![22, -3, 1];
     assert_eq!(
-        statement("4 5 testx 3 22 -3 1"),
+        statement("4 7 test2 x 3 22 -3 1"),
         Ok((
             "",
             Statement::Output(Output {
-                string: "testx",
+                string: "test2 x",
                 condition: res2
             })
+        ))
+    );
+}
+
+#[test]
+fn heuristic_test() {
+    let res = vec![22, -3, 1];
+    assert_eq!(
+        statement("7 1 4 -5 3 3 22 -3 1"),
+        Ok((
+            "",
+            Statement::Heuristic {
+                modifier: HeuristicModifier::Sign,
+                atom: 4,
+                k: -5,
+                priority: 3,
+                condition: res,
+            }
+        ))
+    );
+}
+#[test]
+fn edge_test() {
+    let res = vec![22, -3, 1];
+    assert_eq!(
+        statement("8 -1 4 3 22 -3 1"),
+        Ok((
+            "",
+            Statement::Edge {
+                u: -1,
+                v: 4,
+                condition: res,
+            }
         ))
     );
 }
