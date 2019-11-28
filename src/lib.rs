@@ -8,8 +8,6 @@ use nom::{
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::num::NonZeroI64;
-use std::num::NonZeroU64;
 
 pub fn read(file: &File) -> Result<(), std::io::Error> {
     let file = BufReader::new(file);
@@ -41,41 +39,41 @@ pub struct Header {
 pub enum Statement<'a> {
     Rule(Rule),
     Minimize(Minimize),
-    Projection(Vec<NonZeroU64>),
+    Projection(Vec<u64>),
     Output(Output<'a>),
     External {
-        atom: NonZeroU64,
+        atom: u64,
         init: Init,
     },
-    Assumption(Vec<NonZeroI64>),
+    Assumption(Vec<i64>),
     Heuristic {
         modifier: HeuristicModifier,
-        atom: NonZeroU64,
+        atom: u64,
         k: i64,
         priority: u64,
-        condition: Vec<NonZeroI64>,
+        condition: Vec<i64>,
     },
     Edge {
         u: i64,
         v: i64,
-        condition: Vec<NonZeroI64>,
+        condition: Vec<i64>,
     },
-    Theory,
+    Theory(Theory),
     Comment,
 }
 #[derive(PartialEq, Clone, Debug)]
 pub enum Head {
-    Disjunction { elements: Vec<NonZeroU64> },
-    Choice { elements: Vec<NonZeroU64> },
+    Disjunction { elements: Vec<u64> },
+    Choice { elements: Vec<u64> },
 }
 #[derive(PartialEq, Clone, Debug)]
 pub enum Body {
     NormalBody {
-        elements: Vec<NonZeroI64>,
+        elements: Vec<i64>,
     },
     WeightBody {
         lowerbound: u64,
-        elements: Vec<(u64, NonZeroI64)>,
+        elements: Vec<(u64, i64)>,
     },
 }
 #[derive(PartialEq, Clone, Debug)]
@@ -86,12 +84,12 @@ pub struct Rule {
 #[derive(PartialEq, Clone, Debug)]
 pub struct Minimize {
     pub priority: u64,
-    pub elements: Vec<(u64, NonZeroI64)>,
+    pub elements: Vec<(u64, i64)>,
 }
 #[derive(PartialEq, Clone, Debug)]
 pub struct Output<'a> {
     pub string: &'a str,
-    pub condition: Vec<NonZeroI64>,
+    pub condition: Vec<i64>,
 }
 #[derive(PartialEq, Clone, Debug)]
 pub enum Init {
@@ -109,6 +107,29 @@ pub enum HeuristicModifier {
     Init,
     True,
     False,
+}
+#[derive(PartialEq, Clone, Debug)]
+pub enum Theory {
+    NumericTerm {
+        id: u64,
+        w: i64,
+    },
+    SymbolicTerm {
+        id: u64,
+        string: String,
+    },
+    CompoundTerm {
+        id: u64,
+        t: TheoryTermType,
+        terms: Vec<u64>,
+    },
+}
+#[derive(PartialEq, Clone, Debug)]
+pub enum TheoryTermType {
+    Tuple,
+    Braces,
+    Brackets,
+    SymbolicTermId(u64),
 }
 named!(not_zero<&str, ()>, not!(tag!("0")));
 named!(zero_or_one<&str, char>, one_of!("01"));
@@ -134,44 +155,44 @@ fn neg_number(input: &str) -> IResult<&str, i64> {
 fn number(input: &str) -> IResult<&str, i64> {
     alt((pos_number2, neg_number))(input)
 }
-fn non_zero_pos_number_as_u64(input: &str) -> IResult<&str, NonZeroU64> {
+fn non_zero_pos_number_as_u64(input: &str) -> IResult<&str, u64> {
     let (input, _bla) = not_zero(input)?;
     let (input, num) = pos_number(input)?;
-    Ok((input, NonZeroU64::new(num).unwrap()))
+    Ok((input, num))
 }
-fn non_zero_pos_number_as_i64(input: &str) -> IResult<&str, NonZeroI64> {
+fn non_zero_pos_number_as_i64(input: &str) -> IResult<&str, i64> {
     let (input, _bla) = not_zero(input)?;
     let (input, num) = pos_number2(input)?;
-    Ok((input, NonZeroI64::new(num).unwrap()))
+    Ok((input, num))
 }
-fn negated_atom(input: &str) -> IResult<&str, NonZeroI64> {
+fn negated_atom(input: &str) -> IResult<&str, i64> {
     let (input, _bla) = tag("-")(input)?;
     let (input, id) = non_zero_pos_number_as_u64(input)?;
-    Ok((input, NonZeroI64::new(-(id.get() as i64)).unwrap()))
+    Ok((input, -(id as i64)))
 }
-fn pos_atom(input: &str) -> IResult<&str, NonZeroI64> {
+fn pos_atom(input: &str) -> IResult<&str, i64> {
     let (input, id) = non_zero_pos_number_as_u64(input)?;
-    Ok((input, NonZeroI64::new(id.get() as i64).unwrap()))
+    Ok((input, id as i64))
 }
-fn literal(input: &str) -> IResult<&str, NonZeroI64> {
+fn literal(input: &str) -> IResult<&str, i64> {
     alt((pos_atom, negated_atom))(input)
 }
-fn weighted_literal(input: &str) -> IResult<&str, (u64, NonZeroI64)> {
+fn weighted_literal(input: &str) -> IResult<&str, (u64, i64)> {
     let (input, weight) = pos_number(input)?;
     let (input, _space) = tag(" ")(input)?;
     let (input, literal) = literal(input)?;
     Ok((input, (weight, literal)))
 }
-fn compound_type(input: &str) -> IResult<&str, NonZeroI64> {
+fn compound_type(input: &str) -> IResult<&str, i64> {
     alt((special, non_zero_pos_number_as_i64))(input)
 }
-fn special(input: &str) -> IResult<&str, NonZeroI64> {
+fn special(input: &str) -> IResult<&str, i64> {
     let (input, _bla) = tag("-")(input)?;
     let (input, num) = one_two_three(input)?;
     match num {
-        '1' => Ok((input, NonZeroI64::new(-1).unwrap())),
-        '2' => Ok((input, NonZeroI64::new(-2).unwrap())),
-        '3' => Ok((input, NonZeroI64::new(-3).unwrap())),
+        '1' => Ok((input, -1)),
+        '2' => Ok((input, -2)),
+        '3' => Ok((input, -3)),
         x => panic!("unmatched compound type {}", x),
     }
 }
@@ -309,58 +330,73 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
             let (input, _space) = tag(" ")(input)?;
             match term_type {
                 '0' => {
-                    let (input, u) = non_zero_pos_number_as_u64(input)?;
+                    let (input, id) = non_zero_pos_number_as_u64(input)?;
                     let (input, _space) = tag(" ")(input)?;
                     let (input, w) = number(input)?;
-//                     Statement::Theory::NumericTerm(u, w)
+                    Ok((input, Statement::Theory(Theory::NumericTerm { id, w })))
                 }
                 '1' => {
-                    let (input, u) = non_zero_pos_number_as_u64(input)?;
+                    let (input, id) = non_zero_pos_number_as_u64(input)?;
                     let (input, _space) = tag(" ")(input)?;
                     let (input, len) = pos_number(input)?;
                     let (input, _space) = tag(" ")(input)?;
                     let (input, string) = take(len)(input)?;
-//                     Statement::Theory::SymbolicTerm(u, string)
+                    Ok((
+                        input,
+                        Statement::Theory(Theory::SymbolicTerm {
+                            id,
+                            string: string.to_owned(),
+                        }),
+                    ))
                 }
                 '2' => {
-                    let (input, u) = non_zero_pos_number_as_u64(input)?;
+                    let (input, id) = non_zero_pos_number_as_u64(input)?;
                     let (input, _space) = tag(" ")(input)?;
                     let (input, t) = compound_type(input)?;
-                    match t.get() {
-                        -1 => { // tuple term in parenthesis
-                        }
-                        -2 => { // braces {}
-                        }
-                        -3 => { // brackets []
-                        }
-                        x if x > 0 => { // index of symbolic term
-                        }
+                    let t = match t {
+                        -1 => TheoryTermType::Tuple,
+                        -2 => TheoryTermType::Braces,
+                        -3 => TheoryTermType::Brackets,
+                        x if x > 0 => TheoryTermType::SymbolicTermId(x as u64),
                         x => panic!("unmatched compound type {}", x),
-                    }
+                    };
 
                     let (input, terms) = atoms(input)?;
-//                     Statement::Theory::CompoundTerm { u, t, terms }
+                    Ok((
+                        input,
+                        Statement::Theory(Theory::CompoundTerm { id, t, terms }),
+                    ))
                 }
                 '4' => {
-                  let (input, v) = non_zero_pos_number_as_u64(input)?;
-                  let (input, _space) = tag(" ")(input)?;
-                  let (input, n) = pos_number(input)?;
-                  
+                    let (input, v) = non_zero_pos_number_as_u64(input)?;
+                    let (input, _space) = tag(" ")(input)?;
+                    let (input, n) = pos_number(input)?;
+
+                    Ok((
+                        input,
+                        Statement::Theory(Theory::NumericTerm { id: 0, w: 0 }),
+                    ))
                 }
                 '5' => {
-                  let (input, a) = non_zero_pos_number_as_u64(input)?;
-                  let (input, _space) = tag(" ")(input)?;                
-                  let (input, p) = non_zero_pos_number_as_u64(input)?;
+                    let (input, a) = non_zero_pos_number_as_u64(input)?;
+                    let (input, _space) = tag(" ")(input)?;
+                    let (input, p) = non_zero_pos_number_as_u64(input)?;
+                    Ok((
+                        input,
+                        Statement::Theory(Theory::NumericTerm { id: 0, w: 0 }),
+                    ))
                 }
                 '6' => {
-                  let (input, a) = non_zero_pos_number_as_u64(input)?;
-                  let (input, _space) = tag(" ")(input)?;
-                  let (input, p) = non_zero_pos_number_as_u64(input)?;
+                    let (input, a) = non_zero_pos_number_as_u64(input)?;
+                    let (input, _space) = tag(" ")(input)?;
+                    let (input, p) = non_zero_pos_number_as_u64(input)?;
+                    Ok((
+                        input,
+                        Statement::Theory(Theory::NumericTerm { id: 0, w: 0 }),
+                    ))
                 }
                 x => panic!("unmatched theory term type {}", x),
             }
-            // let (input, rule) = lrule(input)?;
-            Ok((input, Statement::Theory))
         }
         10 => {
             let (input, _space) = tag(" ")(input)?;
@@ -416,33 +452,33 @@ pub fn body(input: &str) -> IResult<&str, Body> {
         _ => panic!("unmatched head type"),
     }
 }
-fn atoms(input: &str) -> IResult<&str, Vec<NonZeroU64>> {
+fn atoms(input: &str) -> IResult<&str, Vec<u64>> {
     let (input, size) = pos_number(input)?;
     let (input, elements) = count(atom_id_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
 
-fn atom_id_with_space(input: &str) -> IResult<&str, NonZeroU64> {
+fn atom_id_with_space(input: &str) -> IResult<&str, u64> {
     let (input, _space) = tag(" ")(input)?;
     non_zero_pos_number_as_u64(input)
 }
-fn literals(input: &str) -> IResult<&str, Vec<NonZeroI64>> {
+fn literals(input: &str) -> IResult<&str, Vec<i64>> {
     let (input, size) = pos_number(input)?;
     let (input, elements) = count(literal_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
 
-fn literal_with_space(input: &str) -> IResult<&str, NonZeroI64> {
+fn literal_with_space(input: &str) -> IResult<&str, i64> {
     let (input, _space) = tag(" ")(input)?;
     literal(input)
 }
-fn weighted_literals(input: &str) -> IResult<&str, Vec<(u64, NonZeroI64)>> {
+fn weighted_literals(input: &str) -> IResult<&str, Vec<(u64, i64)>> {
     let (input, size) = pos_number(input)?;
     let (input, elements) = count(weighted_literal_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
 
-fn weighted_literal_with_space(input: &str) -> IResult<&str, (u64, NonZeroI64)> {
+fn weighted_literal_with_space(input: &str) -> IResult<&str, (u64, i64)> {
     let (input, _space) = tag(" ")(input)?;
     weighted_literal(input)
 }

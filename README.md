@@ -1,3 +1,3 @@
 # aspif parser
 
-[Aspif specification](http://www.cs.uni-potsdam.de/wv/pdfformat/gekakaosscwa16b.pdf)
+[Aspif specification](https://www.cs.uni-potsdam.de/wv/publications/DBLP_conf/iclp/GebserKKOSW16x.pdf)
