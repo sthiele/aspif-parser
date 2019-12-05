@@ -77,7 +77,7 @@ fn rule_test() {
     let res = vec![22, 3, 1];
     let res2 = vec![(3, 22), (2, -3), (1, 1)];
     assert_eq!(
-        lrule("1 3 22 3 1 1 55 3 3 22 2 -3 1 1"),
+        rule("1 3 22 3 1 1 55 3 3 22 2 -3 1 1"),
         Ok((
             "",
             Rule {
