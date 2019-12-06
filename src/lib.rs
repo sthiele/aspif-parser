@@ -1,6 +1,7 @@
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while1},
+    character::complete::one_of,
     combinator::{map_res, opt},
     multi::count,
     named, not, one_of, separated_list, tag, IResult,
@@ -112,57 +113,40 @@ pub enum Statement<'a> {
 pub fn statement(input: &str) -> IResult<&str, Statement> {
     let (input, stype) = statement_type(input)?;
     match stype {
-        '1' => {
+        StatementType::Rule => {
             let (input, _space) = tag(" ")(input)?;
             let (input, rule) = rule(input)?;
             Ok((input, Statement::Rule(rule)))
         }
-        '2' => {
+        StatementType::Minimize => {
             let (input, _space) = tag(" ")(input)?;
             let (input, minimize) = minimize(input)?;
             Ok((input, Statement::Minimize(minimize)))
         }
-        '3' => {
+        StatementType::Projection => {
             let (input, _space) = tag(" ")(input)?;
             let (input, atoms) = atoms(input)?;
             Ok((input, Statement::Projection(atoms)))
         }
-        '4' => {
+        StatementType::Output => {
             let (input, _space) = tag(" ")(input)?;
             let (input, output) = output(input)?;
             Ok((input, Statement::Output(output)))
         }
-        '5' => {
+        StatementType::External => {
             let (input, _space) = tag(" ")(input)?;
             let (input, atom) = non_zero_pos_number_as_u64(input)?;
-
             let (input, init) = init_type(input)?;
-            let init = match init {
-                '0' => Init::Free,
-                '1' => Init::True,
-                '2' => Init::False,
-                '3' => Init::Release,
-                x => panic!("unmatched init type {}", x),
-            };
             Ok((input, Statement::External { atom, init }))
         }
-        '6' => {
+        StatementType::Assumption => {
             let (input, _space) = tag(" ")(input)?;
             let (input, literals) = literals(input)?;
             Ok((input, Statement::Assumption(literals)))
         }
-        '7' => {
+        StatementType::Heuristic => {
             let (input, _space) = tag(" ")(input)?;
             let (input, modifier) = heuristic_modifier(input)?;
-            let modifier = match modifier {
-                '0' => HeuristicModifier::Level,
-                '1' => HeuristicModifier::Sign,
-                '2' => HeuristicModifier::Factor,
-                '3' => HeuristicModifier::Init,
-                '4' => HeuristicModifier::True,
-                '5' => HeuristicModifier::False,
-                x => panic!("unmatched heuristic modifier type {}", x),
-            };
             let (input, _space) = tag(" ")(input)?;
             let (input, atom) = non_zero_pos_number_as_u64(input)?;
             let (input, _space) = tag(" ")(input)?;
@@ -182,7 +166,7 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
                 },
             ))
         }
-        '8' => {
+        StatementType::Edge => {
             let (input, _space) = tag(" ")(input)?;
             let (input, u) = number(input)?;
             let (input, _space) = tag(" ")(input)?;
@@ -191,11 +175,11 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
             let (input, condition) = literals(input)?;
             Ok((input, Statement::Edge { u, v, condition }))
         }
-        '9' => {
+        StatementType::TheoryStatement => {
             let (input, _space) = tag(" ")(input)?;
-            let (input, term_type) = theory_term_type(input)?;
+            let (input, theory_statement_type) = theory_statement_type(input)?;
             let (input, _space) = tag(" ")(input)?;
-            match term_type {
+            match theory_statement_type {
                 '0' => {
                     let (input, id) = pos_number_as_u64(input)?;
                     let (input, _space) = tag(" ")(input)?;
@@ -219,14 +203,7 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
                 '2' => {
                     let (input, id) = pos_number_as_u64(input)?;
                     let (input, _space) = tag(" ")(input)?;
-                    let (input, t) = compound_type(input)?;
-                    let t = match t {
-                        -1 => TheoryTermType::Tuple,
-                        -2 => TheoryTermType::Braces,
-                        -3 => TheoryTermType::Brackets,
-                        x if x > 0 => TheoryTermType::SymbolicTermId(x as u64),
-                        x => panic!("unmatched compound type {}", x),
-                    };
+                    let (input, t) = theory_term_type(input)?;
                     let (input, _space) = tag(" ")(input)?;
                     let (input, terms) = theory_terms(input)?;
                     Ok((input, Statement::CompoundTheoryTerm { id, t, terms }))
@@ -237,7 +214,6 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
                     let (input, theory_terms) = theory_terms(input)?;
                     let (input, _space) = tag(" ")(input)?;
                     let (input, literals) = literals(input)?;
-
                     Ok((
                         input,
                         Statement::TheoryAtomElements {
@@ -306,15 +282,17 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
                         ))
                     }
                 }
-                x => panic!("unmatched theory term type {}", x),
+                _ => IResult::Err(nom::Err::Error((
+                    "unmatched theory term type type",
+                    nom::error::ErrorKind::OneOf,
+                ))),
             }
         }
-        // "10" => {
-        //     let (input, _space) = tag(" ")(input)?;
-        //     // let (input, rule) = lrule(input)?;
-        //     Ok((input, Statement::Comment))
-        // }
-        x => panic!("unmatched statement type {}", x),
+        StatementType::Comment => {
+            let (input, _space) = tag(" ")(input)?;
+            // let (input, rule) = lrule(input)?;
+            Ok((input, Statement::Comment))
+        }
     }
 }
 pub fn aspif_end(input: &str) -> IResult<&str, &str> {
@@ -337,7 +315,7 @@ pub enum Head {
     Choice { elements: Vec<u64> },
 }
 pub fn head(input: &str) -> IResult<&str, Head> {
-    let (input, bla) = zero_or_one(input)?;
+    let (input, bla) = one_of("01")(input)?;
     match bla {
         '0' => {
             let (input, _space) = tag(" ")(input)?;
@@ -349,7 +327,10 @@ pub fn head(input: &str) -> IResult<&str, Head> {
             let (input, elements) = atoms(input)?;
             Ok((input, Head::Choice { elements }))
         }
-        _ => panic!("unmatched head type"),
+        _ => IResult::Err(nom::Err::Error((
+            "unmatched head type",
+            nom::error::ErrorKind::OneOf,
+        ))),
     }
 }
 #[derive(PartialEq, Clone, Debug)]
@@ -363,7 +344,7 @@ pub enum Body {
     },
 }
 pub fn body(input: &str) -> IResult<&str, Body> {
-    let (input, bla) = zero_or_one(input)?;
+    let (input, bla) = one_of("01")(input)?;
     match bla {
         '0' => {
             let (input, _space) = tag(" ")(input)?;
@@ -383,7 +364,10 @@ pub fn body(input: &str) -> IResult<&str, Body> {
                 },
             ))
         }
-        _ => panic!("unmatched head type"),
+        _ => IResult::Err(nom::Err::Error((
+            "unmatched head type",
+            nom::error::ErrorKind::OneOf,
+        ))),
     }
 }
 #[derive(PartialEq, Clone, Debug)]
@@ -417,7 +401,19 @@ pub enum Init {
     False,
     Release,
 }
-named!(init_type<&str, char>, one_of!("0123"));
+pub fn init_type(input: &str) -> IResult<&str, Init> {
+    let (input, init) = one_of("0123")(input)?;
+    match init {
+        '0' => Ok((input, Init::Free)),
+        '1' => Ok((input, Init::True)),
+        '2' => Ok((input, Init::False)),
+        '3' => Ok((input, Init::Release)),
+        _ => IResult::Err(nom::Err::Error((
+            "unmatched init type",
+            nom::error::ErrorKind::OneOf,
+        ))),
+    }
+}
 #[derive(PartialEq, Clone, Debug)]
 pub enum HeuristicModifier {
     Level,
@@ -427,7 +423,21 @@ pub enum HeuristicModifier {
     True,
     False,
 }
-named!(heuristic_modifier<&str, char>, one_of!("012345"));
+fn heuristic_modifier(input: &str) -> IResult<&str, HeuristicModifier> {
+    let (input, modifier) = one_of("012345")(input)?;
+    match modifier {
+        '0' => Ok((input, HeuristicModifier::Level)),
+        '1' => Ok((input, HeuristicModifier::Sign)),
+        '2' => Ok((input, HeuristicModifier::Factor)),
+        '3' => Ok((input, HeuristicModifier::Init)),
+        '4' => Ok((input, HeuristicModifier::True)),
+        '5' => Ok((input, HeuristicModifier::False)),
+        _ => IResult::Err(nom::Err::Error((
+            "unmatched heuristic modifier type",
+            nom::error::ErrorKind::OneOf,
+        ))),
+    }
+}
 #[derive(PartialEq, Clone, Debug)]
 pub enum TheoryTermType {
     Tuple,
@@ -435,11 +445,45 @@ pub enum TheoryTermType {
     Brackets,
     SymbolicTermId(u64),
 }
-named!(theory_term_type<&str, char>, one_of!("012456"));
+named!(theory_statement_type<&str, char>, one_of!("012456"));
 named!(not_zero<&str, ()>, not!(tag!("0")));
-named!(zero_or_one<&str, char>, one_of!("01"));
-named!(one_two_three<&str, char>, one_of!("123"));
-named!(statement_type<&str, char>, one_of!("123456789"));
+enum StatementType {
+    Rule,
+    Minimize,
+    Projection,
+    Output,
+    External,
+    Assumption,
+    Heuristic,
+    Edge,
+    TheoryStatement,
+    Comment,
+}
+fn statement_type(input: &str) -> IResult<&str, StatementType> {
+    let (input, digit) = one_of("123456789")(input)?;
+    match digit {
+        '1' => {
+            let (input, ten) = opt(tag("0"))(input)?;
+            if let Some("0") = ten {
+                Ok((input, StatementType::Comment))
+            } else {
+                Ok((input, StatementType::Rule))
+            }
+        }
+        '2' => Ok((input, StatementType::Minimize)),
+        '3' => Ok((input, StatementType::Projection)),
+        '4' => Ok((input, StatementType::Output)),
+        '5' => Ok((input, StatementType::External)),
+        '6' => Ok((input, StatementType::Assumption)),
+        '7' => Ok((input, StatementType::Heuristic)),
+        '8' => Ok((input, StatementType::Edge)),
+        '9' => Ok((input, StatementType::TheoryStatement)),
+        _ => IResult::Err(nom::Err::Error((
+            "unmatched statement type",
+            nom::error::ErrorKind::OneOf,
+        ))),
+    }
+}
 named!(aspif_tags<&str, Vec<&str>>, separated_list!(tag(" "), string));
 named!(statements<&str, Vec<Statement>>, separated_list!(tag("\n"), statement));
 
@@ -486,17 +530,30 @@ fn weighted_literal(input: &str) -> IResult<&str, (u64, i64)> {
     let (input, literal) = literal(input)?;
     Ok((input, (weight, literal)))
 }
-fn compound_type(input: &str) -> IResult<&str, i64> {
-    alt((special, non_zero_pos_number_as_i64))(input)
+fn theory_term_type(input: &str) -> IResult<&str, TheoryTermType> {
+    let (input, t) = alt((special, non_zero_pos_number_as_i64))(input)?;
+    match t {
+        -1 => Ok((input, TheoryTermType::Tuple)),
+        -2 => Ok((input, TheoryTermType::Braces)),
+        -3 => Ok((input, TheoryTermType::Brackets)),
+        x if x > 0 => Ok((input, TheoryTermType::SymbolicTermId(x as u64))),
+        _ => IResult::Err(nom::Err::Error((
+            "unmatched theory term type",
+            nom::error::ErrorKind::OneOf,
+        ))),
+    }
 }
 fn special(input: &str) -> IResult<&str, i64> {
     let (input, _bla) = tag("-")(input)?;
-    let (input, num) = one_two_three(input)?;
+    let (input, num) = one_of("123")(input)?;
     match num {
         '1' => Ok((input, -1)),
         '2' => Ok((input, -2)),
         '3' => Ok((input, -3)),
-        x => panic!("unmatched compound type {}", x),
+        _ => IResult::Err(nom::Err::Error((
+            "unmatched special theory term type",
+            nom::error::ErrorKind::OneOf,
+        ))),
     }
 }
 fn from_dec(input: &str) -> Result<u64, std::num::ParseIntError> {
