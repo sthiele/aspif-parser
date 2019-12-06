@@ -4,7 +4,7 @@ use nom::{
     character::complete::one_of,
     combinator::{map_res, opt},
     multi::count,
-    named, not, one_of, separated_list, tag, IResult,
+    named, not, separated_list, tag, IResult,
 };
 
 #[derive(PartialEq, Clone, Debug)]
@@ -177,7 +177,7 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
         }
         StatementType::TheoryStatement => {
             let (input, _space) = tag(" ")(input)?;
-            let (input, theory_statement_type) = theory_statement_type(input)?;
+            let (input, theory_statement_type) = one_of("012456")(input)?;
             let (input, _space) = tag(" ")(input)?;
             match theory_statement_type {
                 '0' => {
@@ -445,7 +445,6 @@ pub enum TheoryTermType {
     Brackets,
     SymbolicTermId(u64),
 }
-named!(theory_statement_type<&str, char>, one_of!("012456"));
 named!(not_zero<&str, ()>, not!(tag!("0")));
 enum StatementType {
     Rule,
