@@ -85,7 +85,7 @@ pub enum Statement<'a> {
     },
     SymbolicTheoryTerm {
         id: u64,
-        string: String,
+        string: &'a str,
     },
     CompoundTheoryTerm {
         id: u64,
@@ -196,7 +196,7 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
                         input,
                         Statement::SymbolicTheoryTerm {
                             id,
-                            string: string.to_owned(),
+                            string,
                         },
                     ))
                 }
