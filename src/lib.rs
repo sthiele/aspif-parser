@@ -2,9 +2,10 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while1},
     character::complete::one_of,
-    combinator::{map_res, opt},
-    multi::count,
-    named, not, separated_list, tag, IResult,
+    combinator::{map_res, not, opt},
+    error::ParseError,
+    multi::{count, separated_list},
+    IResult,
 };
 
 #[derive(PartialEq, Clone, Debug)]
@@ -12,7 +13,9 @@ pub struct AspifProgram<'a> {
     pub header: Header,
     pub statements: Vec<Statement<'a>>,
 }
-pub fn aspif_program(input: &str) -> IResult<&str, AspifProgram> {
+pub fn aspif_program<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, AspifProgram, E> {
     let (input, header) = header(input)?;
     let (input, _nl) = tag("\n")(input)?;
     let (input, statements) = statements(input)?;
@@ -27,7 +30,7 @@ pub struct Header {
     pub revision: u64,
     pub incremental: bool,
 }
-pub fn header(input: &str) -> IResult<&str, Header> {
+pub fn header<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Header, E> {
     let (input, _tag) = tag("asp")(input)?;
     let (input, _space) = tag(" ")(input)?;
     let (input, major) = pos_number_as_u64(input)?;
@@ -35,7 +38,7 @@ pub fn header(input: &str) -> IResult<&str, Header> {
     let (input, minor) = pos_number_as_u64(input)?;
     let (input, _space) = tag(" ")(input)?;
     let (input, revision) = pos_number_as_u64(input)?;
-    let (input, optional_tags) = opt(aspif_tags2)(input)?;
+    let (input, optional_tags) = opt(aspif_tags)(input)?;
     let incremental = if let Some(tags) = optional_tags {
         if let Some(_) = tags.iter().find(|x| **x == "incremental") {
             true
@@ -110,7 +113,7 @@ pub enum Statement<'a> {
     },
     Comment,
 }
-pub fn statement(input: &str) -> IResult<&str, Statement> {
+pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Statement, E> {
     let (input, stype) = statement_type(input)?;
     match stype {
         StatementType::Rule => {
@@ -192,13 +195,7 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
                     let (input, len) = pos_number_as_u64(input)?;
                     let (input, _space) = tag(" ")(input)?;
                     let (input, string) = take(len)(input)?;
-                    Ok((
-                        input,
-                        Statement::SymbolicTheoryTerm {
-                            id,
-                            string,
-                        },
-                    ))
+                    Ok((input, Statement::SymbolicTheoryTerm { id, string }))
                 }
                 '2' => {
                     let (input, id) = pos_number_as_u64(input)?;
@@ -282,10 +279,7 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
                         ))
                     }
                 }
-                _ => IResult::Err(nom::Err::Error((
-                    "unmatched theory term type type",
-                    nom::error::ErrorKind::OneOf,
-                ))),
+                x => panic!("unmatched theory term type type {}", x),
             }
         }
         StatementType::Comment => {
@@ -295,7 +289,7 @@ pub fn statement(input: &str) -> IResult<&str, Statement> {
         }
     }
 }
-pub fn aspif_end(input: &str) -> IResult<&str, &str> {
+pub fn aspif_end<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, &'a str, E> {
     tag("0")(input)
 }
 #[derive(PartialEq, Clone, Debug)]
@@ -303,7 +297,7 @@ pub struct Rule {
     pub head: Head,
     pub body: Body,
 }
-pub fn rule(input: &str) -> IResult<&str, Rule> {
+pub fn rule<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Rule, E> {
     let (input, head) = head(input)?;
     let (input, _space) = tag(" ")(input)?;
     let (input, body) = body(input)?;
@@ -314,7 +308,7 @@ pub enum Head {
     Disjunction { elements: Vec<u64> },
     Choice { elements: Vec<u64> },
 }
-pub fn head(input: &str) -> IResult<&str, Head> {
+pub fn head<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Head, E> {
     let (input, bla) = one_of("01")(input)?;
     match bla {
         '0' => {
@@ -327,10 +321,7 @@ pub fn head(input: &str) -> IResult<&str, Head> {
             let (input, elements) = atoms(input)?;
             Ok((input, Head::Choice { elements }))
         }
-        _ => IResult::Err(nom::Err::Error((
-            "unmatched head type",
-            nom::error::ErrorKind::OneOf,
-        ))),
+        x => panic!("unmatched head type {}", x),
     }
 }
 #[derive(PartialEq, Clone, Debug)]
@@ -343,7 +334,7 @@ pub enum Body {
         elements: Vec<(u64, i64)>,
     },
 }
-pub fn body(input: &str) -> IResult<&str, Body> {
+pub fn body<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Body, E> {
     let (input, bla) = one_of("01")(input)?;
     match bla {
         '0' => {
@@ -364,10 +355,7 @@ pub fn body(input: &str) -> IResult<&str, Body> {
                 },
             ))
         }
-        _ => IResult::Err(nom::Err::Error((
-            "unmatched head type",
-            nom::error::ErrorKind::OneOf,
-        ))),
+        x => panic!("unmatched head type {}", x),
     }
 }
 #[derive(PartialEq, Clone, Debug)]
@@ -375,7 +363,7 @@ pub struct Minimize {
     pub priority: u64,
     pub elements: Vec<(u64, i64)>,
 }
-pub fn minimize(input: &str) -> IResult<&str, Minimize> {
+pub fn minimize<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Minimize, E> {
     let (input, priority) = pos_number_as_u64(input)?;
     let (input, _space) = tag(" ")(input)?;
     let (input, elements) = weighted_literals(input)?;
@@ -386,7 +374,7 @@ pub struct Output<'a> {
     pub string: &'a str,
     pub condition: Vec<i64>,
 }
-pub fn output(input: &str) -> IResult<&str, Output> {
+pub fn output<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Output, E> {
     let (input, len) = pos_number_as_u64(input)?;
     let (input, _space) = tag(" ")(input)?;
     let (input, string) = take(len)(input)?;
@@ -401,17 +389,14 @@ pub enum Init {
     False,
     Release,
 }
-pub fn init_type(input: &str) -> IResult<&str, Init> {
+pub fn init_type<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Init, E> {
     let (input, init) = one_of("0123")(input)?;
     match init {
         '0' => Ok((input, Init::Free)),
         '1' => Ok((input, Init::True)),
         '2' => Ok((input, Init::False)),
         '3' => Ok((input, Init::Release)),
-        _ => IResult::Err(nom::Err::Error((
-            "unmatched init type",
-            nom::error::ErrorKind::OneOf,
-        ))),
+        x => panic!("unmatched init type {}", x),
     }
 }
 #[derive(PartialEq, Clone, Debug)]
@@ -423,7 +408,9 @@ pub enum HeuristicModifier {
     True,
     False,
 }
-fn heuristic_modifier(input: &str) -> IResult<&str, HeuristicModifier> {
+fn heuristic_modifier<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, HeuristicModifier, E> {
     let (input, modifier) = one_of("012345")(input)?;
     match modifier {
         '0' => Ok((input, HeuristicModifier::Level)),
@@ -432,10 +419,7 @@ fn heuristic_modifier(input: &str) -> IResult<&str, HeuristicModifier> {
         '3' => Ok((input, HeuristicModifier::Init)),
         '4' => Ok((input, HeuristicModifier::True)),
         '5' => Ok((input, HeuristicModifier::False)),
-        _ => IResult::Err(nom::Err::Error((
-            "unmatched heuristic modifier type",
-            nom::error::ErrorKind::OneOf,
-        ))),
+        x => panic!("unmatched heuristic modifier type {}", x),
     }
 }
 #[derive(PartialEq, Clone, Debug)]
@@ -445,7 +429,6 @@ pub enum TheoryTermType {
     Brackets,
     SymbolicTermId(u64),
 }
-named!(not_zero<&str, ()>, not!(tag!("0")));
 enum StatementType {
     Rule,
     Minimize,
@@ -458,7 +441,9 @@ enum StatementType {
     TheoryStatement,
     Comment,
 }
-fn statement_type(input: &str) -> IResult<&str, StatementType> {
+fn statement_type<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, StatementType, E> {
     let (input, digit) = one_of("123456789")(input)?;
     match digit {
         '1' => {
@@ -477,82 +462,79 @@ fn statement_type(input: &str) -> IResult<&str, StatementType> {
         '7' => Ok((input, StatementType::Heuristic)),
         '8' => Ok((input, StatementType::Edge)),
         '9' => Ok((input, StatementType::TheoryStatement)),
-        _ => IResult::Err(nom::Err::Error((
-            "unmatched statement type",
-            nom::error::ErrorKind::OneOf,
-        ))),
+        x => panic!("unmatched statement type {}", x),
     }
 }
-named!(aspif_tags<&str, Vec<&str>>, separated_list!(tag(" "), string));
-named!(statements<&str, Vec<Statement>>, separated_list!(tag("\n"), statement));
-
-fn pos_number_as_u64(input: &str) -> IResult<&str, u64> {
+fn statements<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<Statement>, E> {
+    separated_list(tag("\n"), statement)(input)
+}
+fn pos_number_as_u64<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E> {
     map_res(take_while1(is_dec_digit), from_dec)(input)
 }
-fn pos_number_as_i64(input: &str) -> IResult<&str, i64> {
+fn pos_number_as_i64<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
     let (input, num) = pos_number_as_u64(input)?;
     Ok((input, num as i64))
 }
-fn neg_number(input: &str) -> IResult<&str, i64> {
+fn neg_number<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
     let (input, _bla) = tag("-")(input)?;
     let (input, num) = pos_number_as_u64(input)?;
     Ok((input, -(num as i64)))
 }
-fn number(input: &str) -> IResult<&str, i64> {
+fn number<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
     alt((pos_number_as_i64, neg_number))(input)
 }
-fn non_zero_pos_number_as_u64(input: &str) -> IResult<&str, u64> {
-    let (input, _bla) = not_zero(input)?;
+fn non_zero_pos_number_as_u64<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, u64, E> {
+    let (input, _bla) = not(tag("0"))(input)?;
     let (input, num) = pos_number_as_u64(input)?;
     Ok((input, num))
 }
-fn non_zero_pos_number_as_i64(input: &str) -> IResult<&str, i64> {
-    let (input, _bla) = not_zero(input)?;
+fn non_zero_pos_number_as_i64<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, i64, E> {
+    let (input, _bla) = not(tag("0"))(input)?;
     let (input, num) = pos_number_as_i64(input)?;
     Ok((input, num))
 }
-fn negated_atom(input: &str) -> IResult<&str, i64> {
+fn negated_atom<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
     let (input, _bla) = tag("-")(input)?;
     let (input, id) = non_zero_pos_number_as_u64(input)?;
     Ok((input, -(id as i64)))
 }
-fn pos_atom(input: &str) -> IResult<&str, i64> {
+fn pos_atom<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
     let (input, id) = non_zero_pos_number_as_u64(input)?;
     Ok((input, id as i64))
 }
-fn literal(input: &str) -> IResult<&str, i64> {
+fn literal<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
     alt((pos_atom, negated_atom))(input)
 }
-fn weighted_literal(input: &str) -> IResult<&str, (u64, i64)> {
+fn weighted_literal<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, (u64, i64), E> {
     let (input, weight) = pos_number_as_u64(input)?;
     let (input, _space) = tag(" ")(input)?;
     let (input, literal) = literal(input)?;
     Ok((input, (weight, literal)))
 }
-fn theory_term_type(input: &str) -> IResult<&str, TheoryTermType> {
+fn theory_term_type<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, TheoryTermType, E> {
     let (input, t) = alt((special, non_zero_pos_number_as_i64))(input)?;
     match t {
         -1 => Ok((input, TheoryTermType::Tuple)),
         -2 => Ok((input, TheoryTermType::Braces)),
         -3 => Ok((input, TheoryTermType::Brackets)),
         x if x > 0 => Ok((input, TheoryTermType::SymbolicTermId(x as u64))),
-        _ => IResult::Err(nom::Err::Error((
-            "unmatched theory term type",
-            nom::error::ErrorKind::OneOf,
-        ))),
+        x => panic!("unmatched theory term type {}", x),
     }
 }
-fn special(input: &str) -> IResult<&str, i64> {
+fn special<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
     let (input, _bla) = tag("-")(input)?;
     let (input, num) = one_of("123")(input)?;
     match num {
         '1' => Ok((input, -1)),
         '2' => Ok((input, -2)),
         '3' => Ok((input, -3)),
-        _ => IResult::Err(nom::Err::Error((
-            "unmatched special theory term type",
-            nom::error::ErrorKind::OneOf,
-        ))),
+        x => panic!("unmatched special theory term type {}", x),
     }
 }
 fn from_dec(input: &str) -> Result<u64, std::num::ParseIntError> {
@@ -561,49 +543,55 @@ fn from_dec(input: &str) -> Result<u64, std::num::ParseIntError> {
 fn is_dec_digit(c: char) -> bool {
     c.is_digit(10)
 }
-pub fn string(input: &str) -> IResult<&str, &str> {
+pub fn string<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, &'a str, E> {
     take_while1(is_alphanumeric)(input)
 }
 fn is_alphanumeric(c: char) -> bool {
     c.is_alphanumeric()
 }
-pub fn aspif_tags2(input: &str) -> IResult<&str, Vec<&str>> {
+pub fn aspif_tags<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<&'a str>, E> {
     let (input, _space) = tag(" ")(input)?;
-    aspif_tags(input)
+    separated_list(tag(" "), string)(input)
 }
-fn atoms(input: &str) -> IResult<&str, Vec<u64>> {
+fn atoms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<u64>, E> {
     let (input, size) = pos_number_as_u64(input)?;
     let (input, elements) = count(atom_id_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
-fn atom_id_with_space(input: &str) -> IResult<&str, u64> {
+fn atom_id_with_space<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E> {
     let (input, _space) = tag(" ")(input)?;
     non_zero_pos_number_as_u64(input)
 }
-fn literals(input: &str) -> IResult<&str, Vec<i64>> {
+fn literals<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<i64>, E> {
     let (input, size) = pos_number_as_u64(input)?;
     let (input, elements) = count(literal_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
-fn literal_with_space(input: &str) -> IResult<&str, i64> {
+fn literal_with_space<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
     let (input, _space) = tag(" ")(input)?;
     literal(input)
 }
-fn weighted_literals(input: &str) -> IResult<&str, Vec<(u64, i64)>> {
+fn weighted_literals<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, Vec<(u64, i64)>, E> {
     let (input, size) = pos_number_as_u64(input)?;
     let (input, elements) = count(weighted_literal_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
-fn weighted_literal_with_space(input: &str) -> IResult<&str, (u64, i64)> {
+fn weighted_literal_with_space<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, (u64, i64), E> {
     let (input, _space) = tag(" ")(input)?;
     weighted_literal(input)
 }
-fn theory_terms(input: &str) -> IResult<&str, Vec<u64>> {
+fn theory_terms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<u64>, E> {
     let (input, size) = pos_number_as_u64(input)?;
     let (input, elements) = count(theory_term_id_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
-fn theory_term_id_with_space(input: &str) -> IResult<&str, u64> {
+fn theory_term_id_with_space<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, u64, E> {
     let (input, _space) = tag(" ")(input)?;
     pos_number_as_u64(input)
 }
