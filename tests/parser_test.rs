@@ -1,20 +1,27 @@
 use aspif_parser::*;
+use nom::error::ErrorKind;
 
 #[test]
 fn string_test() {
-    assert_eq!(string("incremental fu"), Ok((" fu", "incremental")));
+    assert_eq!(
+        string::<(&str, ErrorKind)>("incremental fu"),
+        Ok((" fu", "incremental"))
+    );
 }
 
 #[test]
 fn aspif_tags_test() {
     let res = vec!["incremental", "bla"];
-    assert_eq!(aspif_tags2(" incremental bla"), Ok(("", res)));
+    assert_eq!(
+        aspif_tags::<(&str, ErrorKind)>(" incremental bla"),
+        Ok(("", res))
+    );
 }
 
 #[test]
 fn header_test() {
     assert_eq!(
-        header("asp 12 0 223 incremental blub"),
+        header::<(&str, ErrorKind)>("asp 12 0 223 incremental blub"),
         Ok((
             "",
             Header {
@@ -29,7 +36,7 @@ fn header_test() {
 #[test]
 fn header_test2() {
     assert_eq!(
-        header("asp 12 0 223"),
+        header::<(&str, ErrorKind)>("asp 12 0 223"),
         Ok((
             "",
             Header {
@@ -45,10 +52,13 @@ fn header_test2() {
 #[test]
 fn head_test() {
     let res = vec![22, 3, 1];
-    assert_eq!(head("1 3 22 3 1"), Ok(("", Head::Choice { elements: res })));
+    assert_eq!(
+        head::<(&str, ErrorKind)>("1 3 22 3 1"),
+        Ok(("", Head::Choice { elements: res }))
+    );
     let res = vec![22, 3, 1];
     assert_eq!(
-        head("0 3 22 3 1"),
+        head::<(&str, ErrorKind)>("0 3 22 3 1"),
         Ok(("", Head::Disjunction { elements: res }))
     );
 }
@@ -56,12 +66,12 @@ fn head_test() {
 fn body_test() {
     let res = vec![22, -3, 1];
     assert_eq!(
-        body("0 3 22 -3 1"),
+        body::<(&str, ErrorKind)>("0 3 22 -3 1"),
         Ok(("", Body::NormalBody { elements: res }))
     );
     let res = vec![(3, 22), (2, -3), (1, 1)];
     assert_eq!(
-        body("1 55 3 3 22 2 -3 1 1"),
+        body::<(&str, ErrorKind)>("1 55 3 3 22 2 -3 1 1"),
         Ok((
             "",
             Body::WeightBody {
@@ -77,7 +87,7 @@ fn rule_test() {
     let res = vec![22, 3, 1];
     let res2 = vec![(3, 22), (2, -3), (1, 1)];
     assert_eq!(
-        rule("1 3 22 3 1 1 55 3 3 22 2 -3 1 1"),
+        rule::<(&str, ErrorKind)>("1 3 22 3 1 1 55 3 3 22 2 -3 1 1"),
         Ok((
             "",
             Rule {
@@ -95,7 +105,7 @@ fn statement_test() {
     let res = vec![22, 3, 1];
     let res2 = vec![(3, 22), (2, -3), (1, 1)];
     assert_eq!(
-        statement("1 1 3 22 3 1 1 55 3 3 22 2 -3 1 1"),
+        statement::<(&str, ErrorKind)>("1 1 3 22 3 1 1 55 3 3 22 2 -3 1 1"),
         Ok((
             "",
             Statement::Rule(Rule {
@@ -109,7 +119,7 @@ fn statement_test() {
     );
     let res2 = vec![(3, 22), (2, -3), (1, 1)];
     assert_eq!(
-        statement("2 55 3 3 22 2 -3 1 1"),
+        statement::<(&str, ErrorKind)>("2 55 3 3 22 2 -3 1 1"),
         Ok((
             "",
             Statement::Minimize(Minimize {
@@ -120,7 +130,7 @@ fn statement_test() {
     );
     let res2 = vec![22, -3, 1];
     assert_eq!(
-        statement("4 7 test2 x 3 22 -3 1"),
+        statement::<(&str, ErrorKind)>("4 7 test2 x 3 22 -3 1"),
         Ok((
             "",
             Statement::Output(Output {
@@ -135,7 +145,7 @@ fn statement_test() {
 fn heuristic_test() {
     let res = vec![22, -3, 1];
     assert_eq!(
-        statement("7 1 4 -5 3 3 22 -3 1"),
+        statement::<(&str, ErrorKind)>("7 1 4 -5 3 3 22 -3 1"),
         Ok((
             "",
             Statement::Heuristic {
@@ -152,7 +162,7 @@ fn heuristic_test() {
 fn edge_test() {
     let res = vec![22, -3, 1];
     assert_eq!(
-        statement("8 -1 4 3 22 -3 1"),
+        statement::<(&str, ErrorKind)>("8 -1 4 3 22 -3 1"),
         Ok((
             "",
             Statement::Edge {
