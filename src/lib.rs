@@ -1,11 +1,11 @@
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while1},
-    character::complete::one_of,
+    character::complete::{one_of,char},
     combinator::{map_res, not, opt},
     error::ParseError,
     multi::{count, separated_list},
-    IResult,
+    Err, IResult,
 };
 
 #[derive(PartialEq, Clone, Debug)]
@@ -31,34 +31,47 @@ pub struct Header {
     pub incremental: bool,
 }
 pub fn header<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Header, E> {
-    let (input, _tag) = tag("asp")(input)?;
-    let (input, _space) = tag(" ")(input)?;
-    let (input, major) = pos_number_as_u64(input)?;
-    let (input, _space) = tag(" ")(input)?;
-    let (input, minor) = pos_number_as_u64(input)?;
-    let (input, _space) = tag(" ")(input)?;
-    let (input, revision) = pos_number_as_u64(input)?;
-    let (input, optional_tags) = opt(aspif_tags)(input)?;
-    let incremental = if let Some(tags) = optional_tags {
-        if let Some(_) = tags.iter().find(|x| **x == "incremental") {
-            true
-        } else {
-            false
+    match tag("asp")(input) {
+        Ok((input, _tag)) => {
+            let (input, _space) = tag(" ")(input)?;
+            let (input, major) = pos_number_as_u64(input)?;
+            let (input, _space) = tag(" ")(input)?;
+            let (input, minor) = pos_number_as_u64(input)?;
+            let (input, _space) = tag(" ")(input)?;
+            let (input, revision) = pos_number_as_u64(input)?;
+            let (input, optional_tags) = opt(aspif_tags)(input)?;
+            let incremental = if let Some(tags) = optional_tags {
+                if let Some(_) = tags.iter().find(|x| **x == "incremental") {
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            Ok((
+                input,
+                Header {
+                    major,
+                    minor,
+                    revision,
+                    incremental,
+                },
+            ))
         }
-    } else {
-        false
-    };
-    Ok((
-        input,
-        Header {
-            major,
-            minor,
-            revision,
-            incremental,
-        },
-    ))
+        Err(Err::Error(e)) => Err(Err::Error(nom::error::ParseError::add_context(
+            input,
+            "expected asp",
+            e,
+        ))),
+        Err(Err::Failure(e)) => Err(Err::Failure(nom::error::ParseError::add_context(
+            input,
+            "expected asp",
+            e,
+        ))),
+        Err(Err::Incomplete(e)) => Err(Err::Incomplete(e)),
+    }
 }
-
 #[derive(PartialEq, Clone, Debug)]
 pub enum Statement<'a> {
     Rule(Rule),
@@ -117,7 +130,7 @@ pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str,
     let (input, stype) = statement_type(input)?;
     match stype {
         StatementType::Rule => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, rule) = rule(input)?;
             Ok((input, Statement::Rule(rule)))
         }
@@ -179,8 +192,29 @@ pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str,
             Ok((input, Statement::Edge { u, v, condition }))
         }
         StatementType::TheoryStatement => {
+            println!("success");
             let (input, _space) = tag(" ")(input)?;
-            let (input, theory_statement_type) = one_of("012456")(input)?;
+            println!("success2");
+            let theory_statement_type = one_of("012456")(input);
+            let (input, theory_statement_type) = match theory_statement_type {
+                Err(Err::Error(e)) => {
+                    println!("error");
+                    return Err(Err::Error(nom::error::ParseError::add_context(
+                        input,
+                        "expected theory statement type one of 0,1,2,4,5,6",
+                        e,
+                    )))
+                }
+                Err(Err::Failure(e)) => {
+                    return Err(Err::Failure(nom::error::ParseError::add_context(
+                        input,
+                        "expected theory statement type one of 0,1,2,4,5,6",
+                        e,
+                    )))
+                }
+                Err(Err::Incomplete(e)) => return Err(Err::Incomplete(e)),
+                Ok(x) => x,
+            };
             let (input, _space) = tag(" ")(input)?;
             match theory_statement_type {
                 '0' => {
