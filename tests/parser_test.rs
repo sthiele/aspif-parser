@@ -1,4 +1,4 @@
-use aspif_parser::*;
+use aspif::*;
 use nom::error::ErrorKind;
 
 #[test]
