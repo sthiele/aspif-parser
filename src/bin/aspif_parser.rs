@@ -2,7 +2,7 @@ use nom::error::{VerboseError, VerboseErrorKind};
 use nom::Err;
 use std::path::Path;
 
-//TODO: remove ones nom issue #986 is fixed
+//TODO: remove once nom issue #986 is fixed
 /// transforms a `VerboseError` into a trace with input position information
 fn convert_error(input: &str, e: VerboseError<&str>) -> nom::lib::std::string::String {
     use nom::{lib::std::fmt::Write, Offset};
