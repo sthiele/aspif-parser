@@ -1,5 +1,5 @@
 [package]
-name = "aspif-parser"
+name = "aspif"
 version = "0.1.0"
 authors = ["Sven Thiele <sthiele78@gmail.com>"]
 description = "An aspif parser"
@@ -11,3 +11,4 @@ edition = "2018"
 
 [dependencies]
 nom = "5.0"
+memchr = "^2.0"
