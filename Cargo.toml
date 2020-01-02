@@ -11,3 +11,4 @@ edition = "2018"
 
 [dependencies]
 nom = "5.0"
+memchr = "^2.0"

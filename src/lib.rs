@@ -1,10 +1,10 @@
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while1},
-    character::complete::{one_of,char},
+    character::complete::{char, one_of},
     combinator::{map_res, not, opt},
     error::ParseError,
-    multi::{count, separated_list},
+    multi::{count, many_till, separated_list},
     Err, IResult,
 };
 
@@ -17,10 +17,8 @@ pub fn aspif_program<'a, E: ParseError<&'a str>>(
     input: &'a str,
 ) -> IResult<&'a str, AspifProgram, E> {
     let (input, header) = header(input)?;
-    let (input, _nl) = tag("\n")(input)?;
-    let (input, statements) = statements(input)?;
-    let (input, _nl) = tag("\n")(input)?;
-    let (input, _) = aspif_end(input)?;
+    let (input, _nl) = char('\n')(input)?;
+    let (input, (statements, _)) = many_till(nl_statement, aspif_end)(input)?;
     Ok((input, AspifProgram { header, statements }))
 }
 #[derive(PartialEq, Copy, Clone, Debug)]
@@ -33,19 +31,15 @@ pub struct Header {
 pub fn header<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Header, E> {
     match tag("asp")(input) {
         Ok((input, _tag)) => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, major) = pos_number_as_u64(input)?;
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, minor) = pos_number_as_u64(input)?;
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, revision) = pos_number_as_u64(input)?;
             let (input, optional_tags) = opt(aspif_tags)(input)?;
             let incremental = if let Some(tags) = optional_tags {
-                if let Some(_) = tags.iter().find(|x| **x == "incremental") {
-                    true
-                } else {
-                    false
-                }
+                tags.iter().any(|x| *x == "incremental")
             } else {
                 false
             };
@@ -61,12 +55,12 @@ pub fn header<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, He
         }
         Err(Err::Error(e)) => Err(Err::Error(nom::error::ParseError::add_context(
             input,
-            "expected asp",
+            "header, expected asp",
             e,
         ))),
         Err(Err::Failure(e)) => Err(Err::Failure(nom::error::ParseError::add_context(
             input,
-            "expected asp",
+            "header, expected asp",
             e,
         ))),
         Err(Err::Incomplete(e)) => Err(Err::Incomplete(e)),
@@ -126,6 +120,7 @@ pub enum Statement<'a> {
     },
     Comment,
 }
+
 pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Statement, E> {
     let (input, stype) = statement_type(input)?;
     match stype {
@@ -135,41 +130,41 @@ pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str,
             Ok((input, Statement::Rule(rule)))
         }
         StatementType::Minimize => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, minimize) = minimize(input)?;
             Ok((input, Statement::Minimize(minimize)))
         }
         StatementType::Projection => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, atoms) = atoms(input)?;
             Ok((input, Statement::Projection(atoms)))
         }
         StatementType::Output => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, output) = output(input)?;
             Ok((input, Statement::Output(output)))
         }
         StatementType::External => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, atom) = non_zero_pos_number_as_u64(input)?;
             let (input, init) = init_type(input)?;
             Ok((input, Statement::External { atom, init }))
         }
         StatementType::Assumption => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, literals) = literals(input)?;
             Ok((input, Statement::Assumption(literals)))
         }
         StatementType::Heuristic => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, modifier) = heuristic_modifier(input)?;
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, atom) = non_zero_pos_number_as_u64(input)?;
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, k) = number(input)?;
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, priority) = pos_number_as_u64(input)?;
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, condition) = literals(input)?;
             Ok((
                 input,
@@ -183,67 +178,64 @@ pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str,
             ))
         }
         StatementType::Edge => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, u) = number(input)?;
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, v) = number(input)?;
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, condition) = literals(input)?;
             Ok((input, Statement::Edge { u, v, condition }))
         }
         StatementType::TheoryStatement => {
-            println!("success");
-            let (input, _space) = tag(" ")(input)?;
-            println!("success2");
+            let (input, _space) = char(' ')(input)?;
             let theory_statement_type = one_of("012456")(input);
             let (input, theory_statement_type) = match theory_statement_type {
                 Err(Err::Error(e)) => {
-                    println!("error");
                     return Err(Err::Error(nom::error::ParseError::add_context(
                         input,
-                        "expected theory statement type one of 0,1,2,4,5,6",
+                        "theory statement type, expected one of 0,1,2,4,5,6",
                         e,
-                    )))
+                    )));
                 }
                 Err(Err::Failure(e)) => {
                     return Err(Err::Failure(nom::error::ParseError::add_context(
                         input,
-                        "expected theory statement type one of 0,1,2,4,5,6",
+                        "theory statement type, expected one of 0,1,2,4,5,6",
                         e,
                     )))
                 }
                 Err(Err::Incomplete(e)) => return Err(Err::Incomplete(e)),
                 Ok(x) => x,
             };
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             match theory_statement_type {
                 '0' => {
                     let (input, id) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, w) = number(input)?;
                     Ok((input, Statement::NumericTheoryTerm { id, w }))
                 }
                 '1' => {
                     let (input, id) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, len) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, string) = take(len)(input)?;
                     Ok((input, Statement::SymbolicTheoryTerm { id, string }))
                 }
                 '2' => {
                     let (input, id) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, t) = theory_term_type(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, terms) = theory_terms(input)?;
                     Ok((input, Statement::CompoundTheoryTerm { id, t, terms }))
                 }
                 '4' => {
                     let (input, id) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, theory_terms) = theory_terms(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, literals) = literals(input)?;
                     Ok((
                         input,
@@ -256,9 +248,9 @@ pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str,
                 }
                 '5' => {
                     let (input, atom) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, symbolic_term) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, theory_atom_elements) = theory_terms(input)?;
                     if atom > 0 {
                         Ok((
@@ -283,13 +275,13 @@ pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str,
                 }
                 '6' => {
                     let (input, atom) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, symbolic_term) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, theory_atom_elements) = theory_terms(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, theory_operator) = pos_number_as_u64(input)?;
-                    let (input, _space) = tag(" ")(input)?;
+                    let (input, _space) = char(' ')(input)?;
                     let (input, theory_term) = pos_number_as_u64(input)?;
 
                     if atom > 0 {
@@ -317,14 +309,13 @@ pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str,
             }
         }
         StatementType::Comment => {
-            let (input, _space) = tag(" ")(input)?;
-            // let (input, rule) = lrule(input)?;
+            let (input, _space) = char(' ')(input)?;
             Ok((input, Statement::Comment))
         }
     }
 }
-pub fn aspif_end<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, &'a str, E> {
-    tag("0")(input)
+pub fn aspif_end<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, char, E> {
+    char('0')(input)
 }
 #[derive(PartialEq, Clone, Debug)]
 pub struct Rule {
@@ -333,7 +324,7 @@ pub struct Rule {
 }
 pub fn rule<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Rule, E> {
     let (input, head) = head(input)?;
-    let (input, _space) = tag(" ")(input)?;
+    let (input, _space) = char(' ')(input)?;
     let (input, body) = body(input)?;
     Ok((input, Rule { head, body }))
 }
@@ -346,12 +337,12 @@ pub fn head<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Head
     let (input, bla) = one_of("01")(input)?;
     match bla {
         '0' => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, elements) = atoms(input)?;
             Ok((input, Head::Disjunction { elements }))
         }
         '1' => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, elements) = atoms(input)?;
             Ok((input, Head::Choice { elements }))
         }
@@ -372,14 +363,14 @@ pub fn body<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Body
     let (input, bla) = one_of("01")(input)?;
     match bla {
         '0' => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, elements) = literals(input)?;
             Ok((input, Body::NormalBody { elements }))
         }
         '1' => {
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, lowerbound) = pos_number_as_u64(input)?;
-            let (input, _space) = tag(" ")(input)?;
+            let (input, _space) = char(' ')(input)?;
             let (input, elements) = weighted_literals(input)?;
             Ok((
                 input,
@@ -399,7 +390,7 @@ pub struct Minimize {
 }
 pub fn minimize<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Minimize, E> {
     let (input, priority) = pos_number_as_u64(input)?;
-    let (input, _space) = tag(" ")(input)?;
+    let (input, _space) = char(' ')(input)?;
     let (input, elements) = weighted_literals(input)?;
     Ok((input, Minimize { priority, elements }))
 }
@@ -410,9 +401,9 @@ pub struct Output<'a> {
 }
 pub fn output<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Output, E> {
     let (input, len) = pos_number_as_u64(input)?;
-    let (input, _space) = tag(" ")(input)?;
+    let (input, _space) = char(' ')(input)?;
     let (input, string) = take(len)(input)?;
-    let (input, _space) = tag(" ")(input)?;
+    let (input, _space) = char(' ')(input)?;
     let (input, condition) = literals(input)?;
     Ok((input, Output { string, condition }))
 }
@@ -481,8 +472,8 @@ fn statement_type<'a, E: ParseError<&'a str>>(
     let (input, digit) = one_of("123456789")(input)?;
     match digit {
         '1' => {
-            let (input, ten) = opt(tag("0"))(input)?;
-            if let Some("0") = ten {
+            let (input, ten) = opt(char('0'))(input)?;
+            if let Some('0') = ten {
                 Ok((input, StatementType::Comment))
             } else {
                 Ok((input, StatementType::Rule))
@@ -499,8 +490,10 @@ fn statement_type<'a, E: ParseError<&'a str>>(
         x => panic!("unmatched statement type {}", x),
     }
 }
-fn statements<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<Statement>, E> {
-    separated_list(tag("\n"), statement)(input)
+fn nl_statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Statement, E> {
+    let (input, statement) = statement(input)?;
+    let (input, _) = char('\n')(input)?;
+    Ok((input, statement))
 }
 fn pos_number_as_u64<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E> {
     map_res(take_while1(is_dec_digit), from_dec)(input)
@@ -510,7 +503,7 @@ fn pos_number_as_i64<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a 
     Ok((input, num as i64))
 }
 fn neg_number<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
-    let (input, _bla) = tag("-")(input)?;
+    let (input, _bla) = char('-')(input)?;
     let (input, num) = pos_number_as_u64(input)?;
     Ok((input, -(num as i64)))
 }
@@ -520,19 +513,19 @@ fn number<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E
 fn non_zero_pos_number_as_u64<'a, E: ParseError<&'a str>>(
     input: &'a str,
 ) -> IResult<&'a str, u64, E> {
-    let (input, _bla) = not(tag("0"))(input)?;
+    let (input, _bla) = not(char('0'))(input)?;
     let (input, num) = pos_number_as_u64(input)?;
     Ok((input, num))
 }
 fn non_zero_pos_number_as_i64<'a, E: ParseError<&'a str>>(
     input: &'a str,
 ) -> IResult<&'a str, i64, E> {
-    let (input, _bla) = not(tag("0"))(input)?;
+    let (input, _bla) = not(char('0'))(input)?;
     let (input, num) = pos_number_as_i64(input)?;
     Ok((input, num))
 }
 fn negated_atom<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
-    let (input, _bla) = tag("-")(input)?;
+    let (input, _bla) = char('-')(input)?;
     let (input, id) = non_zero_pos_number_as_u64(input)?;
     Ok((input, -(id as i64)))
 }
@@ -545,7 +538,7 @@ fn literal<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, 
 }
 fn weighted_literal<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, (u64, i64), E> {
     let (input, weight) = pos_number_as_u64(input)?;
-    let (input, _space) = tag(" ")(input)?;
+    let (input, _space) = char(' ')(input)?;
     let (input, literal) = literal(input)?;
     Ok((input, (weight, literal)))
 }
@@ -562,7 +555,7 @@ fn theory_term_type<'a, E: ParseError<&'a str>>(
     }
 }
 fn special<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
-    let (input, _bla) = tag("-")(input)?;
+    let (input, _bla) = char('-')(input)?;
     let (input, num) = one_of("123")(input)?;
     match num {
         '1' => Ok((input, -1)),
@@ -584,8 +577,8 @@ fn is_alphanumeric(c: char) -> bool {
     c.is_alphanumeric()
 }
 pub fn aspif_tags<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<&'a str>, E> {
-    let (input, _space) = tag(" ")(input)?;
-    separated_list(tag(" "), string)(input)
+    let (input, _space) = char(' ')(input)?;
+    separated_list(char(' '), string)(input)
 }
 fn atoms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<u64>, E> {
     let (input, size) = pos_number_as_u64(input)?;
@@ -593,7 +586,7 @@ fn atoms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<u64
     Ok((input, elements))
 }
 fn atom_id_with_space<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E> {
-    let (input, _space) = tag(" ")(input)?;
+    let (input, _space) = char(' ')(input)?;
     non_zero_pos_number_as_u64(input)
 }
 fn literals<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<i64>, E> {
@@ -602,7 +595,7 @@ fn literals<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<
     Ok((input, elements))
 }
 fn literal_with_space<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
-    let (input, _space) = tag(" ")(input)?;
+    let (input, _space) = char(' ')(input)?;
     literal(input)
 }
 fn weighted_literals<'a, E: ParseError<&'a str>>(
@@ -615,7 +608,7 @@ fn weighted_literals<'a, E: ParseError<&'a str>>(
 fn weighted_literal_with_space<'a, E: ParseError<&'a str>>(
     input: &'a str,
 ) -> IResult<&'a str, (u64, i64), E> {
-    let (input, _space) = tag(" ")(input)?;
+    let (input, _space) = char(' ')(input)?;
     weighted_literal(input)
 }
 fn theory_terms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<u64>, E> {
@@ -626,6 +619,6 @@ fn theory_terms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, 
 fn theory_term_id_with_space<'a, E: ParseError<&'a str>>(
     input: &'a str,
 ) -> IResult<&'a str, u64, E> {
-    let (input, _space) = tag(" ")(input)?;
+    let (input, _space) = char(' ')(input)?;
     pos_number_as_u64(input)
 }
