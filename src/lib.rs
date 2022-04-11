@@ -1,12 +1,34 @@
+use nom::error::{convert_error, FromExternalError, ParseError, VerboseError};
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while1},
     character::complete::{char, one_of},
     combinator::{map_res, not, opt},
-    error::ParseError,
-    multi::{count, many_till, separated_list},
+    multi::{count, many_till, separated_list1},
     Err, IResult,
 };
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum AspifError {
+    #[error("ParseError: {msg}")]
+    ParseError { msg: String },
+}
+
+pub fn read_aspif<'a>(input: &'a str) -> Result<AspifProgram, AspifError> {
+    match aspif_program::<VerboseError<&str>>(input) {
+        Ok((_, result)) => Ok(result),
+
+        Err(Err::Error(e)) | Err(Err::Failure(e)) => {
+            let msg = convert_error(input, e);
+            Err(AspifError::ParseError { msg })
+        }
+        Err(e) => Err(AspifError::ParseError {
+            msg: format!("Failed to parse aspif!\n{e}"),
+        }
+        .into()),
+    }
+}
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct AspifProgram<'a> {
@@ -15,7 +37,10 @@ pub struct AspifProgram<'a> {
 }
 pub fn aspif_program<'a, E: ParseError<&'a str>>(
     input: &'a str,
-) -> IResult<&'a str, AspifProgram, E> {
+) -> IResult<&'a str, AspifProgram, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, header) = header(input)?;
     let (input, _nl) = char('\n')(input)?;
     let (input, (statements, _)) = many_till(nl_statement, aspif_end)(input)?;
@@ -28,43 +53,32 @@ pub struct Header {
     pub revision: u64,
     pub incremental: bool,
 }
-pub fn header<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Header, E> {
-    match tag("asp")(input) {
-        Ok((input, _tag)) => {
-            let (input, _space) = char(' ')(input)?;
-            let (input, major) = pos_number_as_u64(input)?;
-            let (input, _space) = char(' ')(input)?;
-            let (input, minor) = pos_number_as_u64(input)?;
-            let (input, _space) = char(' ')(input)?;
-            let (input, revision) = pos_number_as_u64(input)?;
-            let (input, optional_tags) = opt(aspif_tags)(input)?;
-            let incremental = if let Some(tags) = optional_tags {
-                tags.iter().any(|x| *x == "incremental")
-            } else {
-                false
-            };
-            Ok((
-                input,
-                Header {
-                    major,
-                    minor,
-                    revision,
-                    incremental,
-                },
-            ))
-        }
-        Err(Err::Error(e)) => Err(Err::Error(nom::error::ParseError::add_context(
-            input,
-            "header, expected asp",
-            e,
-        ))),
-        Err(Err::Failure(e)) => Err(Err::Failure(nom::error::ParseError::add_context(
-            input,
-            "header, expected asp",
-            e,
-        ))),
-        Err(Err::Incomplete(e)) => Err(Err::Incomplete(e)),
-    }
+pub fn header<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Header, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
+    let (input, _tag) = tag("asp")(input)?;
+    let (input, _space) = char(' ')(input)?;
+    let (input, major) = pos_number_as_u64(input)?;
+    let (input, _space) = char(' ')(input)?;
+    let (input, minor) = pos_number_as_u64(input)?;
+    let (input, _space) = char(' ')(input)?;
+    let (input, revision) = pos_number_as_u64(input)?;
+    let (input, optional_tags) = opt(aspif_tags)(input)?;
+    let incremental = if let Some(tags) = optional_tags {
+        tags.iter().any(|x| *x == "incremental")
+    } else {
+        false
+    };
+    Ok((
+        input,
+        Header {
+            major,
+            minor,
+            revision,
+            incremental,
+        },
+    ))
 }
 #[derive(PartialEq, Clone, Debug)]
 pub enum Statement<'a> {
@@ -121,7 +135,10 @@ pub enum Statement<'a> {
     Comment,
 }
 
-pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Statement, E> {
+pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Statement, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, stype) = statement_type(input)?;
     match stype {
         StatementType::Rule => {
@@ -188,25 +205,25 @@ pub fn statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str,
         }
         StatementType::TheoryStatement => {
             let (input, _space) = char(' ')(input)?;
-            let theory_statement_type = one_of("012456")(input);
-            let (input, theory_statement_type) = match theory_statement_type {
-                Err(Err::Error(e)) => {
-                    return Err(Err::Error(nom::error::ParseError::add_context(
-                        input,
-                        "theory statement type, expected one of 0,1,2,4,5,6",
-                        e,
-                    )));
-                }
-                Err(Err::Failure(e)) => {
-                    return Err(Err::Failure(nom::error::ParseError::add_context(
-                        input,
-                        "theory statement type, expected one of 0,1,2,4,5,6",
-                        e,
-                    )))
-                }
-                Err(Err::Incomplete(e)) => return Err(Err::Incomplete(e)),
-                Ok(x) => x,
-            };
+            let (input, theory_statement_type) = one_of("012456")(input)?;
+            // let (input, theory_statement_type) = match theory_statement_type {
+            //     Err(Err::Error(e)) => {
+            //         return Err(Err::Error(nom::error::ParseError::add_context(
+            //             input,
+            //             "theory statement type, expected one of 0,1,2,4,5,6",
+            //             e,
+            //         )));
+            //     }
+            //     Err(Err::Failure(e)) => {
+            //         return Err(Err::Failure(nom::error::ParseError::add_context(
+            //             input,
+            //             "theory statement type, expected one of 0,1,2,4,5,6",
+            //             e,
+            //         )))
+            //     }
+            //     Err(Err::Incomplete(e)) => return Err(Err::Incomplete(e)),
+            //     Ok(x) => x,
+            // };
             let (input, _space) = char(' ')(input)?;
             match theory_statement_type {
                 '0' => {
@@ -322,7 +339,10 @@ pub struct Rule {
     pub head: Head,
     pub body: Body,
 }
-pub fn rule<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Rule, E> {
+pub fn rule<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Rule, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, head) = head(input)?;
     let (input, _space) = char(' ')(input)?;
     let (input, body) = body(input)?;
@@ -333,7 +353,10 @@ pub enum Head {
     Disjunction { elements: Vec<u64> },
     Choice { elements: Vec<u64> },
 }
-pub fn head<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Head, E> {
+pub fn head<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Head, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, bla) = one_of("01")(input)?;
     match bla {
         '0' => {
@@ -359,7 +382,10 @@ pub enum Body {
         elements: Vec<(u64, i64)>,
     },
 }
-pub fn body<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Body, E> {
+pub fn body<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Body, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, bla) = one_of("01")(input)?;
     match bla {
         '0' => {
@@ -388,7 +414,10 @@ pub struct Minimize {
     pub priority: u64,
     pub elements: Vec<(u64, i64)>,
 }
-pub fn minimize<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Minimize, E> {
+pub fn minimize<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Minimize, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, priority) = pos_number_as_u64(input)?;
     let (input, _space) = char(' ')(input)?;
     let (input, elements) = weighted_literals(input)?;
@@ -399,7 +428,10 @@ pub struct Output<'a> {
     pub string: &'a str,
     pub condition: Vec<i64>,
 }
-pub fn output<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Output, E> {
+pub fn output<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Output, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, len) = pos_number_as_u64(input)?;
     let (input, _space) = char(' ')(input)?;
     let (input, string) = take(len)(input)?;
@@ -490,53 +522,92 @@ fn statement_type<'a, E: ParseError<&'a str>>(
         x => panic!("unmatched statement type {}", x),
     }
 }
-fn nl_statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Statement, E> {
+fn nl_statement<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Statement, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, statement) = statement(input)?;
     let (input, _) = char('\n')(input)?;
     Ok((input, statement))
 }
-fn pos_number_as_u64<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E> {
-    map_res(take_while1(is_dec_digit), from_dec)(input)
+// fn pos_number_as_u64<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E> {
+//     map_res(take_while1(is_dec_digit), from_dec)(input)
+// }
+
+fn pos_number_as_u64<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
+    let (input, int) = map_res(take_while1(is_dec_digit), from_dec)(input)?;
+    Ok((input, int as u64))
 }
-fn pos_number_as_i64<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
+
+fn pos_number_as_i64<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, num) = pos_number_as_u64(input)?;
     Ok((input, num as i64))
 }
-fn neg_number<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
+fn neg_number<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, _bla) = char('-')(input)?;
     let (input, num) = pos_number_as_u64(input)?;
     Ok((input, -(num as i64)))
 }
-fn number<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
+fn number<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     alt((pos_number_as_i64, neg_number))(input)
 }
 fn non_zero_pos_number_as_u64<'a, E: ParseError<&'a str>>(
     input: &'a str,
-) -> IResult<&'a str, u64, E> {
+) -> IResult<&'a str, u64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, _bla) = not(char('0'))(input)?;
     let (input, num) = pos_number_as_u64(input)?;
     Ok((input, num))
 }
 fn non_zero_pos_number_as_i64<'a, E: ParseError<&'a str>>(
     input: &'a str,
-) -> IResult<&'a str, i64, E> {
+) -> IResult<&'a str, i64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, _bla) = not(char('0'))(input)?;
     let (input, num) = pos_number_as_i64(input)?;
     Ok((input, num))
 }
-fn negated_atom<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
+fn negated_atom<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, _bla) = char('-')(input)?;
     let (input, id) = non_zero_pos_number_as_u64(input)?;
     Ok((input, -(id as i64)))
 }
-fn pos_atom<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
+fn pos_atom<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, id) = non_zero_pos_number_as_u64(input)?;
     Ok((input, id as i64))
 }
-fn literal<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
+fn literal<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     alt((pos_atom, negated_atom))(input)
 }
-fn weighted_literal<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, (u64, i64), E> {
+fn weighted_literal<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, (u64, i64), E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, weight) = pos_number_as_u64(input)?;
     let (input, _space) = char(' ')(input)?;
     let (input, literal) = literal(input)?;
@@ -544,7 +615,10 @@ fn weighted_literal<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a s
 }
 fn theory_term_type<'a, E: ParseError<&'a str>>(
     input: &'a str,
-) -> IResult<&'a str, TheoryTermType, E> {
+) -> IResult<&'a str, TheoryTermType, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, t) = alt((special, non_zero_pos_number_as_i64))(input)?;
     match t {
         -1 => Ok((input, TheoryTermType::Tuple)),
@@ -578,47 +652,69 @@ fn is_alphanumeric(c: char) -> bool {
 }
 pub fn aspif_tags<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<&'a str>, E> {
     let (input, _space) = char(' ')(input)?;
-    separated_list(char(' '), string)(input)
+    separated_list1(char(' '), string)(input)
 }
-fn atoms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<u64>, E> {
+fn atoms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<u64>, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, size) = pos_number_as_u64(input)?;
     let (input, elements) = count(atom_id_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
-fn atom_id_with_space<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E> {
+fn atom_id_with_space<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, _space) = char(' ')(input)?;
     non_zero_pos_number_as_u64(input)
 }
-fn literals<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<i64>, E> {
+fn literals<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<i64>, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, size) = pos_number_as_u64(input)?;
     let (input, elements) = count(literal_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
-fn literal_with_space<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E> {
+fn literal_with_space<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, _space) = char(' ')(input)?;
     literal(input)
 }
 fn weighted_literals<'a, E: ParseError<&'a str>>(
     input: &'a str,
-) -> IResult<&'a str, Vec<(u64, i64)>, E> {
+) -> IResult<&'a str, Vec<(u64, i64)>, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, size) = pos_number_as_u64(input)?;
     let (input, elements) = count(weighted_literal_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
 fn weighted_literal_with_space<'a, E: ParseError<&'a str>>(
     input: &'a str,
-) -> IResult<&'a str, (u64, i64), E> {
+) -> IResult<&'a str, (u64, i64), E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, _space) = char(' ')(input)?;
     weighted_literal(input)
 }
-fn theory_terms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<u64>, E> {
+fn theory_terms<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Vec<u64>, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, size) = pos_number_as_u64(input)?;
     let (input, elements) = count(theory_term_id_with_space, size as usize)(input)?;
     Ok((input, elements))
 }
-fn theory_term_id_with_space<'a, E: ParseError<&'a str>>(
-    input: &'a str,
-) -> IResult<&'a str, u64, E> {
+fn theory_term_id_with_space<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u64, E>
+where
+    E: FromExternalError<&'a str, std::num::ParseIntError>,
+{
     let (input, _space) = char(' ')(input)?;
     pos_number_as_u64(input)
 }
