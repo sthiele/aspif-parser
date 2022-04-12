@@ -1,9 +1,13 @@
+use std::fs::File;
+use std::io::BufReader;
 use std::path::Path;
 
 fn main() {
-    let file = Path::new("theory.aspif");
-    let buf = std::fs::read_to_string(file).unwrap();
-    match aspif::read_aspif(&buf) {
+    let path = Path::new("theory.aspif");
+
+    let file = File::open(path).unwrap();
+    let buf_reader = BufReader::new(file);
+    match aspif::read_aspif(buf_reader) {
         Ok(result) => println!("{:?}", result),
 
         Err(e) => {

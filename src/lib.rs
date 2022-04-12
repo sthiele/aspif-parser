@@ -7,33 +7,164 @@ use nom::{
     multi::{count, many_till, separated_list1},
     Err, IResult,
 };
+use std::io::Lines;
 use thiserror::Error;
-
 #[derive(Error, Debug)]
 pub enum AspifError {
     #[error("ParseError: {msg}")]
     ParseError { msg: String },
+    #[error("ParseError incomplete: {msg}")]
+    ParseErrorIncomplete { msg: String },
+    #[error("IoError: ")]
+    IoError(#[from] std::io::Error),
 }
 
-pub fn read_aspif<'a>(input: &'a str) -> Result<AspifProgram, AspifError> {
-    match aspif_program::<VerboseError<&str>>(input) {
-        Ok((_, result)) => Ok(result),
+/// Try parsing an aspif program
+///
+/// Returns a [ParseResult]
+pub fn read_aspif<R>(buf_read: R) -> Result<ParseResult, AspifError>
+where
+    R: std::io::BufRead,
+{
+    let mut lines = buf_read.lines();
 
-        Err(Err::Error(e)) | Err(Err::Failure(e)) => {
-            let msg = convert_error(input, e);
-            Err(AspifError::ParseError { msg })
+    // Read header and create an incomplete AspifProgram
+    let incomplete_aspif_program = match lines.next() {
+        Some(line_result) => match line_result {
+            Ok(line1) => match read_header_line(&line1) {
+                Ok(aspif_program) => aspif_program,
+                Err(e) => return Err(e.into()),
+            },
+            Err(e) => return Err(e.into()),
+        },
+        None => {
+            return Err(AspifError::ParseError {
+                msg: format!("No header found"),
+            });
         }
-        Err(e) => Err(AspifError::ParseError {
-            msg: format!("Failed to parse aspif!\n{e}"),
-        }
-        .into()),
+    };
+
+    // Read statements
+    let (state, statements) = match read_statements(&mut lines) {
+        Ok((statements, state)) => (state, statements),
+        Err(e) => return Err(e.into()),
+    };
+    match state {
+        ParseState::Complete => Ok(ParseResult::Complete(AspifProgram {
+            header: incomplete_aspif_program.header,
+            statements,
+        })),
+        ParseState::Incomplete => Ok(ParseResult::Incomplete(AspifProgram {
+            header: incomplete_aspif_program.header,
+            statements,
+        })),
     }
 }
 
+/// Try parsing an aspif header line
+///
+/// Returns a [IncompleteAspifProgram]
+pub fn read_header_line(input: &str) -> Result<AspifProgram, AspifError> {
+    // Read header
+    match header::<VerboseError<&str>>(input) {
+        Err(Err::Error(e)) | Err(Err::Failure(e)) => {
+            let msg = convert_error::<&str>(&input, e);
+            Err(AspifError::ParseError { msg })
+        }
+        Err(Err::Incomplete(e)) => Err(AspifError::ParseError {
+            msg: format!("Needed: {:?}", e),
+        }),
+        Ok((rest, header)) => {
+            // check if the whole line has been consumed
+            if rest.len() == 0 {
+                Ok(AspifProgram {
+                    header,
+                    statements: vec![],
+                })
+            } else {
+                return Err(AspifError::ParseError {
+                    msg: format!("Header line contains unparsed rest: {rest}"),
+                });
+            }
+        }
+    }
+}
+
+/// Read aspif statements until the aspif end symbol, end of lines, or parse error
+///
+/// Returns a vector of statements and a [ParseState] which is [ParseState::Incomplete] if no end symbol could be parsed.
+pub fn read_statements<R>(lines: &mut Lines<R>) -> Result<(Vec<Statement>, ParseState), AspifError>
+where
+    R: std::io::BufRead,
+{
+    let mut statements: Vec<Statement> = vec![];
+
+    for line_result in lines {
+        match line_result {
+            Ok(line) => match statement::<VerboseError<&str>>(&line) {
+                Ok((rest, statement)) => {
+                    statements.push(statement);
+                    // check if the whole line has been consumed
+                    if rest.len() == 0 {
+                        continue;
+                    } else {
+                        return Err(AspifError::ParseError {
+                            msg: format!("Statement line contains unparsed rest: {rest}"),
+                        });
+                    }
+                }
+                Err(Err::Error(_e)) | Err(Err::Failure(_e)) => {
+                    match aspif_end::<VerboseError<&str>>(&line) {
+                        Ok((_rest, _end_symbol)) => return Ok((statements, ParseState::Complete)),
+                        Err(Err::Error(_e)) | Err(Err::Failure(_e)) => {
+                            return Err(AspifError::ParseError {
+                                msg: format!("Error reading aspif line"),
+                            })
+                        }
+
+                        Err(Err::Incomplete(_e)) => {
+                            return Err(AspifError::ParseError {
+                                msg: format!("Error reading aspif line"),
+                            })
+                        }
+                    }
+                }
+                Err(Err::Incomplete(_e)) => match aspif_end::<VerboseError<&str>>(&line) {
+                    Ok((_rest, _end_symbol)) => return Ok((statements, ParseState::Complete)),
+                    Err(Err::Error(_e)) | Err(Err::Failure(_e)) => {
+                        return Err(AspifError::ParseError {
+                            msg: format!("Error reading aspif line"),
+                        })
+                    }
+
+                    Err(Err::Incomplete(_e)) => {
+                        return Err(AspifError::ParseError {
+                            msg: format!("Error reading aspif line"),
+                        })
+                    }
+                },
+            },
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok((statements, ParseState::Incomplete))
+}
+
+pub enum ParseState {
+    Complete,
+    Incomplete,
+}
+
 #[derive(PartialEq, Clone, Debug)]
-pub struct AspifProgram<'a> {
+pub enum ParseResult {
+    Complete(AspifProgram),
+    Incomplete(AspifProgram),
+}
+
+#[derive(PartialEq, Clone, Debug)]
+pub struct AspifProgram {
     pub header: Header,
-    pub statements: Vec<Statement<'a>>,
+    pub statements: Vec<Statement>,
 }
 pub fn aspif_program<'a, E: ParseError<&'a str>>(
     input: &'a str,
@@ -81,11 +212,11 @@ where
     ))
 }
 #[derive(PartialEq, Clone, Debug)]
-pub enum Statement<'a> {
+pub enum Statement {
     Rule(Rule),
     Minimize(Minimize),
     Projection(Vec<u64>),
-    Output(Output<'a>),
+    Output(Output),
     External {
         atom: u64,
         init: Init,
@@ -109,7 +240,7 @@ pub enum Statement<'a> {
     },
     SymbolicTheoryTerm {
         id: u64,
-        string: &'a str,
+        string: String,
     },
     CompoundTheoryTerm {
         id: u64,
@@ -238,7 +369,13 @@ where
                     let (input, len) = pos_number_as_u64(input)?;
                     let (input, _space) = char(' ')(input)?;
                     let (input, string) = take(len)(input)?;
-                    Ok((input, Statement::SymbolicTheoryTerm { id, string }))
+                    Ok((
+                        input,
+                        Statement::SymbolicTheoryTerm {
+                            id,
+                            string: string.into(),
+                        },
+                    ))
                 }
                 '2' => {
                     let (input, id) = pos_number_as_u64(input)?;
@@ -424,8 +561,8 @@ where
     Ok((input, Minimize { priority, elements }))
 }
 #[derive(PartialEq, Clone, Debug)]
-pub struct Output<'a> {
-    pub string: &'a str,
+pub struct Output {
+    pub string: String,
     pub condition: Vec<i64>,
 }
 pub fn output<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Output, E>
@@ -437,7 +574,13 @@ where
     let (input, string) = take(len)(input)?;
     let (input, _space) = char(' ')(input)?;
     let (input, condition) = literals(input)?;
-    Ok((input, Output { string, condition }))
+    Ok((
+        input,
+        Output {
+            string: string.into(),
+            condition,
+        },
+    ))
 }
 #[derive(PartialEq, Clone, Debug)]
 pub enum Init {

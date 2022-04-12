@@ -134,7 +134,7 @@ fn statement_test() {
         Ok((
             "",
             Statement::Output(Output {
-                string: "test2 x",
+                string: "test2 x".to_string(),
                 condition: res2
             })
         ))
