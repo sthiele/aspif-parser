@@ -91,7 +91,7 @@ pub fn read_header_line(input: &str) -> Result<AspifProgram, AspifError> {
 }
 /// Try parsing an aspif statement line
 ///
-/// Returns a [IncompleteAspifProgram]
+/// Returns a [Statement]
 pub fn read_statement_line(input: &str) -> Result<Statement, AspifError> {
     // Read header
     match statement::<VerboseError<&str>>(input) {
@@ -112,6 +112,20 @@ pub fn read_statement_line(input: &str) -> Result<Statement, AspifError> {
                 });
             }
         }
+    }
+}
+/// Try parsing an aspif end line
+pub fn read_end_line(input: &str) -> Result<(), AspifError> {
+    // Read header
+    match aspif_end::<VerboseError<&str>>(input) {
+        Err(Err::Error(e)) | Err(Err::Failure(e)) => {
+            let msg = convert_error::<&str>(&input, e);
+            Err(AspifError::ParseError { msg })
+        }
+        Err(Err::Incomplete(e)) => Err(AspifError::ParseError {
+            msg: format!("Needed: {:?}", e),
+        }),
+        Ok((_rest, _end_symbol)) => Ok(()),
     }
 }
 /// Read aspif statements until the aspif end symbol, end of lines, or parse error
